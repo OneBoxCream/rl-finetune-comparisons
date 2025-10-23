@@ -1,60 +1,59 @@
-# rl-finetune-comparisons
+# rl-finetune-comparisons  
 
-This repository compares Gradient Reward Policy Optimization (GRPO), Direct Preference Optimization (DPO) and Scalarized Reward Policy Optimization (SRPO) for multimodal fine ‑tuning on top of the flux1.0 kontext model. We will evaluate how these algorithms improve the base model after training. For reward modeling we use the existing AutoQC model that scores image quality.
+本仓库用于比较梯度奖励策略优化（GRPO）、直接偏好优化（DPO）和标量化奖励策略优化（SRPO）在多模态微调场景下的效果。基准模型是 flux1.0 kontext，我们将在该模型基础上继续训练，评估三种算法带来的提升。奖励模型使用我们已有的 AutoQC 模型，它可以对图片质量进行评分，作为额外奖励信号。  
 
-## Mathematical Outline
+## 数学概述  
 
-### GRPO
-GRPO optimizes a policy by ascending the gradient of expected reward. For a policy parameterized by $\theta$ the objective is $J(\theta)=\mathbb{E}_{\pi_\theta}[R]$ and the gradient is estimated via REINFORCE:
-\[\nabla_\theta J(\theta) = \mathbb{E}_{\pi_\theta}\big[\nabla_\theta \log \pi_\theta(a|s)\,(R - b)\big],\n\]
-where $R$ is the reward (here, a combination of task‑specific reward and image quality score from AutoQC) and $b$ is a baseline to reduce variance.
+### GRPO  
+GRPO 通过沿期望奖励的梯度上升来优化策略。对于参数化策略 $\theta$，目标函数为 $J(\theta)=\mathbb{E}_{\pi_\theta}[R]$。梯度可以通过 REINFORCE 估计：  
+$$  
+\nabla_\theta J(\theta) = \mathbb{E}_{\pi_\theta}\big[\nabla_\theta \log \pi_\theta(a|s)\,(R - b)\big],  
+$$  
+其中 $R$ 是奖励（这里是任务奖励与 AutoQC 图像质量分数的组合），$b$ 是降低方差的基线。  
 
-### DPO
-Direct Preference Optimization learns directly from preference pairs by maximizing the likelihood of preferred outputs. Given a triplet $(x, y^{*}, y^{-})$ with $y^{*}$ preferred over $y^{-}$, DPO minimizes the pairwise logistic loss:
-\[\
-\mathcal{L}_{\text{DPO}} = -\mathbb{E}_{(x,y^{*},y^{-})}\left[\log \sigma\big(f_\theta(x,y^{*}) - f_\theta(x,y^{-})\big)\right],
-\]
-where $f_\theta$ is the model’s scoring function and $\sigma$ is the sigmoid. Gradient updates follow standard supervised learning on this loss.
+### DPO  
+直接偏好优化直接从偏好对中学习，通过最大化偏好结果的似然来训练。在给定三元组 $(x, y^+, y^-)$，其中 $y^+$ 优于 $y^-$，DPO 最小化偏好损失：  
+$$  
+\mathcal{L}(x) = -\mathbb{E}_{\{(x,y^+,y^-)\}}\left[\log\sigma\big(f_\theta(x,y^+) - f_\theta(x,y^-)\big)\right],  
+$$  
+其中 $f_\theta$ 是模型的评分函数，$\sigma$ 是 sigmoid 函数。梯度更新遵循该损失的标准监督学习。  
 
-### SRPO
-Scalarized Reward Policy Optimization combines multiple reward signals into a single scalar reward. If rewards $r_1,\dots,r_k$ are combined with weights $w_i$, the overall reward is $R = \sum_{i} w_i\,r_i$. The policy gradient is then
-\[\nabla_\theta J(\theta) = \mathbb{E}_{\pi_\theta}\big[\nabla_\theta \log \pi_\theta(a|s)\,(R - b)\big],\n\]
-similar to GRPO but with a scalarized reward that may include accuracy, F1 and AutoQC scores.
+### SRPO  
+标量化奖励策略优化将多个奖励信号组合成单一的标量奖励。如果奖励 $r_1,\dots,r_k$ 以权重 $w_i$ 组合，整体奖励为 $R = \sum_i w_i\,r_i$。然后  
+$$  
+\nabla_\theta J(\theta) = \mathbb{E}_{\pi_\theta}\big[\nabla_\theta \log \pi_\theta(a|s)\,(R - b)\big],  
+$$  
+类似 GRPO，但使用标量化奖励。SRPO 适用于同时考虑准确率、F1 值和 AutoQC 评分的场景。  
 
-## Pseudocode for Gradient Updates
+## 梯度更新伪代码  
 
-```pseudo
-initialize policy parameters θ
-for each training iteration:
-    sample a batch of examples x from training data
-    for each example x:
-        generate candidate outputs using current policy πθ
-        compute rewards:
-            - task reward (e.g., accuracy/F1 on multimodal task)
-            - quality reward from AutoQC
-            - preferences (for DPO only)
-        depending on algorithm:
-            if GRPO:
-                compute log‑probabilities log πθ(a|s)
-                estimate gradient ∇θ log πθ(a|s) * (R - baseline)
-            if DPO:
-                form pairs (preferred, non‑preferred) and compute logistic loss gradient
-            if SRPO:
-                form scalar reward R = Σ w_i r_i and estimate policy gradient
-    update θ using optimizer (e.g., Adam) with aggregated gradients
-```
+```pseudo  
+# 初始化策略参数 θ  
+for each batch of examples:  
+    # 根据当前策略采样动作或生成输出  
+    outputs = policy(x; θ)  
+    # 计算奖励（任务指标 + AutoQC 分数）  
+    rewards = compute_rewards(outputs)  
+    # 估计梯度  
+    grads = ∇_θ log π_θ(outputs | x) * (rewards - baseline)  
+    # 更新参数  
+    θ = θ + α * grads  
+```  
 
-## Evaluation Plan
+对于 DPO，其伪代码将偏好损失作为梯度计算；SRPO 则改变奖励计算部分。  
 
-We will assess how fine ‑tuning with GRPO, DPO and SRPO affects the flux1.0 kontext model. Evaluation metrics include:
+## 评价计划  
 
-- **Accuracy** – fraction of correct predictions on a held‑out multimodal validation set.
-- **F1‑score** – harmonic mean of precision and recall for tasks such as classification.
-- **Reward signals** – scores from the AutoQC model (image quality) and any task‑specific reward; for SRPO, we will report contributions of each reward component.
-- Training curves and convergence behaviour will also be compared.
+我们计划通过以下指标对比三种算法在多模态微调中的效果：  
 
-## Notebook
+- **准确率**：输出与参考答案匹配的比例。  
+- **F1 值**：在分类任务中综合考虑精确率与召回率的指标。  
+- **奖励信号**：来自 AutoQC 的图片质量分数以及其它任务奖励的加权组合。  
 
-A Colab‑ready skeleton notebook that sets up datasets, defines placeholders for GRPO/DPO/SRPO algorithms and evaluation hooks can be found in the `notebooks` directory. Use the link below to open it in Colab:
+实验将分阶段进行：首先在 flux1.0 kontext 上分别使用 GRPO、DPO 和 SRPO 进行后训练；然后在验证集上计算上述指标，并绘制学习曲线。对比不同算法的收敛速度、最终性能和稳定性。  
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/OneBoxCream/rl-finetune-comparisons/blob/main/notebooks/grpo_dpo_srpo_comparison.ipynb)
+## Colab  
+
+您可以通过以下按钮在 Google Colab 中查看并运行本仓库中的笔记本：  
+
+[![在 Colab 上打开](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/OneBoxCream/rl-finetune-comparisons/blob/main/notebooks/grpo_dpo_srpo_comparison.ipynb)
